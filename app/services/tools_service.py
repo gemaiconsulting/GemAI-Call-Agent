@@ -57,60 +57,69 @@ async def handle_tool_invocation(uv_ws, toolName, invocationId, parameters):
         print(f"Verification result: {verification_result}")
         await uv_ws.send(json.dumps(tool_result))
     
-    elif toolName == "move_to_claim_handling":
-        print(f'Moving to claim handling stage with parameters: {parameters}')
-        # Get claim handling stage system prompt
-        claim_prompt = get_stage_prompt('claim_handling')
-        claim_voice = get_stage_voice('claim_handling')
-        
-        # Create stage transition response
-        stage_transition_msg = "Thank you for verifying your identity. I'll now help you with your claim. Could you tell me if you're filing a new claim or checking the status of an existing claim?"
-        
-        # Prepare tool result with stage transition
-        stage_result = {
-            "type": "client_tool_result",
-            "invocationId": invocationId,
-            "result": json.dumps({
-                "systemPrompt": claim_prompt,
-                "voice": claim_voice,
-                "toolResultText": stage_transition_msg
-            }),
-            "response_type": "new-stage"
+    elif toolName == "calendar_book":
+        print(f"📅 Invoked 'calendar_book' with params: {parameters}")
+
+        # Extract from Ultravox params
+        name = parameters.get("name")
+        email = parameters.get("email")
+        purpose = parameters.get("purpose")
+        datetime_str = parameters.get("datetime")
+        calendar_id = parameters.get("calendar_id")
+
+        if not all([name, email, purpose, datetime_str, calendar_id]):
+            msg = "Missing parameters for booking. Need: name, email, purpose, datetime, calendar_id."
+            print(msg)
+            await uv_ws.send(json.dumps({
+                "type": "client_tool_result",
+                "invocationId": invocationId,
+                "result": msg,
+                "response_type": "tool-response"
+            }))
+            return
+
+        # 🔗 Send to n8n webhook
+        call_sid = None
+        session = None
+        for sid, sess in sessions.items():
+            if sess.get("uv_ws") == uv_ws:
+                call_sid = sid
+                session = sess
+                break
+
+        payload = {
+            "route": "3",
+            "number": session.get("callerNumber", "Unknown"),
+            "data": json.dumps({
+                "name": name,
+                "email": email,
+                "purpose": purpose,
+                "datetime": datetime_str,
+                "calendar_id": calendar_id
+            })
         }
-        
-        print(f"Transitioning to claim handling stage with voice: {claim_voice}")
-        await uv_ws.send(json.dumps(stage_result))
-    
-    elif toolName == "submit_claim":
-        print(f'Submitting claim with parameters: {parameters}')
-        # Extract claim details parameters
-        incident_description = parameters.get('incident_description', '')
-        incident_date = parameters.get('incident_date', '')
-        incident_location = parameters.get('incident_location', '')
-        involved_parties = parameters.get('involved_parties', '')
-        supporting_info = parameters.get('supporting_info', '')
-        
-        # This is a mock claim submission - in a real system, you would submit to a database
-        # Generate a fake claim ID for demo purposes
-        import random
-        claim_id = f"CL-{random.randint(10000, 99999)}"
-        
-        submission_result = {
-            "status": "success",
-            "claim_id": claim_id,
-            "processing_time": "3-5 business days"
-        }
-        
-        # Send claim submission result back to the agent
-        tool_result = {
-            "type": "client_tool_result",
-            "invocationId": invocationId,
-            "result": json.dumps(submission_result),
-            "response_type": "tool-response"
-        }
-        print(f"Claim submission result: {submission_result}")
-        await uv_ws.send(json.dumps(tool_result))
-    
+
+        try:
+            webhook_response = await send_to_webhook(payload)
+            result = json.loads(webhook_response).get("message", "Booking confirmed.")
+
+            await uv_ws.send(json.dumps({
+                "type": "client_tool_result",
+                "invocationId": invocationId,
+                "result": result,
+                "response_type": "tool-response"
+            }))
+        except Exception as e:
+            print(f"❌ Error in calendar_book: {e}")
+            await uv_ws.send(json.dumps({
+                "type": "client_tool_result",
+                "invocationId": invocationId,
+                "error_type": "booking_error",
+                "error_message": "Calendar booking failed due to a server error."
+            }))
+
+
+    #meeting handling
     elif toolName == "schedule_meeting":
         print(f'Arguments passed to schedule_meeting tool: {parameters}')
         # Validate required parameters

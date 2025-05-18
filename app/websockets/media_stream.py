@@ -7,6 +7,7 @@ import audioop
 import base64
 import traceback
 import websockets
+from datetime import datetime
 from fastapi import WebSocket, WebSocketDisconnect
 from app.utils.websocket_utils import safe_close_websocket
 from app.core.config import LOG_EVENT_TYPES
@@ -15,6 +16,8 @@ from app.services.ultravox_service import create_ultravox_call
 from app.core.prompts import SYSTEM_MESSAGE
 from app.core.shared_state import sessions
 from fastapi import APIRouter
+from app.api.endpoints.calls import send_action_to_n8n
+
 router = APIRouter()
 
 @router.websocket("/media-stream")
@@ -89,21 +92,58 @@ async def media_stream(websocket: WebSocket):
                     if msg_type == "transcript":
                         role = msg_data.get("role")
                         text = msg_data.get("text") or msg_data.get("delta")
-                        final = msg_data.get("final", False)
+                        final = msg_data.get("final", False)    
 
                         if role and text:
                             role_cap = role.capitalize()
                             session['transcript'] += f"{role_cap}: {text}\n"
-                            # Add emojis based on the role
-                            if role_cap == "Agent":
-                                emoji = "🤖"
-                            else:  # user or any other role
-                                emoji = "👤"
-                                
-                            print(f"{emoji} {role_cap}: {text}")                            
-                            
-                            if final:
-                                print(f"Transcript for {role_cap} finalized.")
+
+                        if role and text:
+                            role_cap = role.capitalize()
+                            session['transcript'] += f"{role_cap}: {text}\n"
+
+                            # Dynamic entity capture from user input
+                            if "@" in text and "." in text:
+                                session["callerEmail"] = text.strip()
+
+                            lower_text = text.lower()
+                            if any(x in lower_text for x in ["my name is", "this is", "i'm", "i am"]):
+                                session["callerName"] = text.strip()
+
+                            print("📩 Current session name:", session.get("callerName"))
+                            print("📧 Current session email:", session.get("callerEmail"))
+
+                        if final and "book" in lower_text and "appointment" in lower_text:
+
+                            # Fetch dynamic session values if present
+                            caller_name = session.get("callerName", "Unknown")
+                            calendar_id = session.get("calendar_id", "primary")  # fallback if not yet captured
+                            appointment_time = session.get("appointmentTime")  # expected to be set dynamically if available
+
+                            send_action_to_n8n(
+                                action="book_call",
+                                session_id=call_sid,
+                                caller_number=session.get("callerNumber"),
+                                extra_data={
+                                    "data": json.dumps({
+                                        "name": caller_name,
+                                        "email": caller_email,
+                                        "purpose": text,
+                                        "datetime": appointment_time,
+                                        "calendar_id": calendar_id
+                                    })
+                                }
+                            )
+
+                        emoji = "🤖" if role_cap == "Agent" else "👤"
+                        caller_name = session.get("callerName", "Unknown")
+                        caller_email = session.get("callerEmail", "Unknown")
+                        print(f"📅 Booking request from {caller_name} ({caller_email}) with content: {text}")
+                        print(f"{emoji} {role_cap}: {text}")
+
+                        if final:
+                            print(f"Transcript for {role_cap} finalized.")
+
 
                     elif msg_type == "client_tool_invocation":
                         toolName = msg_data.get("toolName", "")

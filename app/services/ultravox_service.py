@@ -2,8 +2,9 @@
 Services for interacting with Ultravox voice AI.
 """
 import json
-from app.core.prompts import get_personalized_system_message
+import httpx
 import requests
+from app.core.prompts import get_personalized_system_message
 from app.core.config import (
     ULTRAVOX_API_KEY,
     ULTRAVOX_MODEL, 
@@ -11,6 +12,8 @@ from app.core.config import (
     ULTRAVOX_SAMPLE_RATE,
     ULTRAVOX_BUFFER_SIZE
 )
+
+
 
 
 async def create_ultravox_call(system_prompt: str, first_message: str, agent_id: str, voice: str) -> str:
@@ -21,12 +24,14 @@ async def create_ultravox_call(system_prompt: str, first_message: str, agent_id:
     headers = {
         "X-API-Key": ULTRAVOX_API_KEY,
         "Content-Type": "application/json"
+
+
     }
     print("📞 check_returning_user number:", agent_id)
 
 
     payload = {
-        "systemPrompt": get_personalized_system_message(first_message),
+        "systemPrompt": system_prompt,
         "model": ULTRAVOX_MODEL,
         "voice": voice,
         "temperature": 0.1,
@@ -49,167 +54,45 @@ async def create_ultravox_call(system_prompt: str, first_message: str, agent_id:
             "minimumInterruptionDuration": "0.09s"
         },
         "selectedTools": [
-                        {
-                        "temporaryTool": {
-                            "modelToolName": "check_returning_user",
-                            "description": "Check if the caller has previously interacted and return a personalized greeting if found.",
-                            "dynamicParameters": [
-                            {
-                                "name": "caller_number",
-                                "location": "PARAMETER_LOCATION_STATIC",
-                                "schema": {
-                                "type": "string",
-                                "description": "Phone number of the caller"
-                                },
-                                "required": True
-                            }
-                            ],
-                            "staticParameters": [
-                            {"name": "caller_number",
-                            "value": agent_id # ✅ This now passes the number properly
-                            }],
-                            "timeout": "10s",
-                            "client": {}
-                        }
-                        },
-    {
-      "temporaryTool": {
-        "modelToolName": "verify",
-        "description": "Verify the customer's identity before proceeding with any sensitive information or actions",
-        "dynamicParameters": [
-          {
-            "name": "full_name",
-            "location": "PARAMETER_LOCATION_BODY",
-            "schema": {"type": "string", "description": "Customer's full name"},
-            "required": True
-          },
-          {
-            "name": "date_of_birth",
-            "location": "PARAMETER_LOCATION_BODY",
-            "schema": {"type": "string", "description": "DOB (YYYY-MM-DD)"},
-            "required": True
-          },
-          {
-            "name": "policy_number",
-            "location": "PARAMETER_LOCATION_BODY",
-            "schema": {"type": "string", "description": "Insurance policy number"},
-            "required": True
-          }
-        ],
-        "timeout": "20s",
-        "client": {}
-      }
-    },
-
-            {
-                "temporaryTool": {
-                    "modelToolName": "move_to_claim_handling",
-                    "description": "Transition to the claim handling stage after successful verification",
-                    "dynamicParameters": [],
-                    "timeout": "20s",
-                    "client": {},
-                },
-            },
-            {
-                "temporaryTool": {
-                    "modelToolName": "submit_claim",
-                    "description": "Submit a new insurance claim with all required details",
-                    "dynamicParameters": [
-                        {
-                            "name": "incident_description",
-                            "location": "PARAMETER_LOCATION_BODY",
-                            "schema": {
-                                "type": "string",
-                                "description": "Detailed description of the incident"
-                            },
-                            "required": True
-                        },
-                        {
-                            "name": "incident_date",
-                            "location": "PARAMETER_LOCATION_BODY",
-                            "schema": {
-                                "type": "string",
-                                "description": "Date of the incident (YYYY-MM-DD format)"
-                            },
-                            "required": True
-                        },
-                        {
-                            "name": "incident_location",
-                            "location": "PARAMETER_LOCATION_BODY",
-                            "schema": {
-                                "type": "string",
-                                "description": "Location where the incident occurred"
-                            },
-                            "required": True
-                        },
-                        {
-                            "name": "involved_parties",
-                            "location": "PARAMETER_LOCATION_BODY",
-                            "schema": {
-                                "type": "string",
-                                "description": "Any other parties involved in the incident"
-                            },
-                            "required": False
-                        },
-                        {
-                            "name": "supporting_info",
-                            "location": "PARAMETER_LOCATION_BODY",
-                            "schema": {
-                                "type": "string",
-                                "description": "Any additional information supporting the claim"
-                            },
-                            "required": False
-                        }
-                    ],
-                    "timeout": "20s",
-                    "client": {},
-                },
-            },
-            {
-                "temporaryTool": {
-                    "modelToolName": "move_to_call_summary",
-                    "description": "Transition to the call summary stage when the conversation is ready to conclude",
-                    "dynamicParameters": [],
-                    "timeout": "20s",
-                    "client": {},
-                },
-            },
-            {
-                "temporaryTool": {
-                    "modelToolName": "question_and_answer",
-                    "description": "Get answers to customer questions about insurance policies and claims",
-                    "dynamicParameters": [
-                        {
-                            "name": "question",
-                            "location": "PARAMETER_LOCATION_BODY",
-                            "schema": {
-                                "type": "string",
-                                "description": "Question to be answered"
-                            },
-                            "required": True
-                        }
-                    ],
-                    "timeout": "20s",
-                    "client": {},
-                },
-            },
-            {
+        {
+           "temporaryTool": {
+               "modelToolName": "check_returning_user",
+               "description": "Check if the caller has previously interacted and return a personalized greeting if found.",
+               "dynamicParameters": [
+                   {
+                       "name": "caller_number",
+                       "location": 4,                
+                       "schema": { "type": "string", "description": "Phone number of the caller" },
+                       "required": True
+                   }
+               ],
+                
+               "timeout": "10s",
+              "http": {
+             "url": "https://harbormoor.app.n8n.cloud/webhook/route1",
+             "httpMethod": "POST"
+           }
+           }
+           
+       },         
+          
+             {
                 "temporaryTool": {
                     "modelToolName": "schedule_meeting",
                     "description": "Schedule a meeting for a customer. Returns a message indicating whether the booking was successful or not.",
                     "dynamicParameters": [
                         {
                             "name": "name",
-                            "location": "PARAMETER_LOCATION_BODY",
+                            "location": 4,
                             "schema": {
                                 "type": "string",
-                                "description": "Customer's name"
+                                "description": "Customer's full name"
                             },
                             "required": True
                         },
                         {
                             "name": "email",
-                            "location": "PARAMETER_LOCATION_BODY",
+                            "location": 4,
                             "schema": {
                                 "type": "string",
                                 "description": "Customer's email"
@@ -218,7 +101,7 @@ async def create_ultravox_call(system_prompt: str, first_message: str, agent_id:
                         },
                         {
                             "name": "purpose",
-                            "location": "PARAMETER_LOCATION_BODY",
+                            "location": 4,
                             "schema": {
                                 "type": "string",
                                 "description": "Purpose of the Meeting"
@@ -227,91 +110,64 @@ async def create_ultravox_call(system_prompt: str, first_message: str, agent_id:
                         },
                         {
                             "name": "datetime",
-                            "location": "PARAMETER_LOCATION_BODY",
+                            "location": 4,
                             "schema": {
                                 "type": "string",
                                 "description": "Meeting Datetime"
                             },
+                            
                             "required": True
                         },
                         {
-                            "name": "location",
-                            "location": "PARAMETER_LOCATION_BODY",
-                            "schema": {
-                                "type": "string",
-                                "enum": ["London", "Manchester", "Brighton"],
-                                "description": "Meeting location"
-                            },
-                            "required": True
+        "name": "calendar_id",
+        "location": 4,
+        "schema": {
+          "type": "string",
+          "description": "ID of the calendar to schedule the meeting in"
+        },
+         "required": True
                         }
                     ],
                     "timeout": "20s",
-                    "client": {},
-                },
-            },
-            { 
-                "temporaryTool": {
-                    "modelToolName": "hangUp",
-                    "description": "End the call",
-                    "client": {},
+           "http": {
+             "url": "https://harbormoor.app.n8n.cloud/webhook/route3",
+             "httpMethod": "POST",
+           }
                 }
-            },
-            {
-                "temporaryTool": {
-                    "modelToolName": "escalate_to_manager",
-                    "description": "Transfer the call to a manager for handling customer complaints, escalations, or special requests",
-                    "dynamicParameters": [
-                        {
-                            "name": "issue_type",
-                            "location": "PARAMETER_LOCATION_BODY",
-                            "schema": {
-                                "type": "string",
-                                "enum": ["complaint", "refund_request", "special_accommodation", "general_escalation"],
-                                "description": "Type of issue requiring manager assistance"
-                            },
-                            "required": True
-                        },
-                        {
-                            "name": "issue_details",
-                            "location": "PARAMETER_LOCATION_BODY",
-                            "schema": {
-                                "type": "string",
-                                "description": "Detailed description of the customer's issue"
-                            },
-                            "required": True
-                        },
-                        {
-                            "name": "customer_name",
-                            "location": "PARAMETER_LOCATION_BODY",
-                            "schema": {
-                                "type": "string",
-                                "description": "Customer's name if available"
-                            },
-                            "required": False
-                        }
-                    ],
-                    "timeout": "20s",
-                    "client": {},
-                },
             }
-        ]
+        ],
+        "tool_choice": "auto",
+       "metadata": {
+           "caller_number": agent_id
+       }
     }
+
     print(f"📞 Using caller_number = {agent_id}")
     print("📤 Payload being sent to Ultravox:")
     print(json.dumps(payload, indent=2))
 
     try:
-        resp = requests.post(url, headers=headers, json=payload)
-        if not resp.ok:
-            print("❌ Ultravox create call error:")
-            print("Status:", resp.status_code)
-            print("Response:", resp.text)
-            return ""
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(url, headers=headers, json=payload)
+            resp.raise_for_status()  # ✅ <-- Add this line here
+
+                        # ── DEBUG ──
+            print("🧨 Ultravox Response Status:", resp.status_code)
+            try:
+                print("🧨 Ultravox Response Body:", resp.json())
+            except Exception:
+                print("🧨 Ultravox Response Text:", await resp.text())
+            # ───────────
+
+
+
+        
 
         body = resp.json()
-        join_url = body.get("joinUrl") or ""
+        join_url = body.get("joinUrl", "")
         print("Ultravox joinUrl received:", join_url)
         return join_url
     except Exception as e:
-        print("Ultravox create call request failed:", e)
+        print("Ultravox create call request failed:", str(e))
+        print("Failed Payload:", json.dumps(payload, indent=2))
         return ""

@@ -35,6 +35,47 @@ async def handle_tool_invocation(uv_ws, toolName, invocationId, parameters):
         return
 
     
+
+    elif toolName == "check_returning_user":
+        print(f"🔁 Checking returning user for number: {parameters}")
+
+        caller_number = parameters.get("caller_number")
+
+        payload = {
+            "route": "1",
+            "number": caller_number,
+            "data": {}
+        }
+
+        try:
+            webhook_response = await send_to_webhook(payload)
+            result = json.loads(webhook_response)
+
+            if isinstance(result, list) and len(result) > 0:
+    # Sort by row_number descending, use first
+                latest = sorted(result, key=lambda x: x.get("row_number", 0), reverse=True)[0]
+                message = latest.get("message", "Welcome back! How can I assist you today?")
+            else:
+                message = "Welcome to F3 Marina. How can I assist you today?"
+
+
+            await uv_ws.send(json.dumps({
+                "type": "client_tool_result",
+                "invocationId": invocationId,
+                "result": message,
+                "response_type": "tool-response"
+            }))
+        except Exception as e:
+            print(f"❌ Error in check_returning_user: {e}")
+            await uv_ws.send(json.dumps({
+                "type": "client_tool_result",
+                "invocationId": invocationId,
+                "result": "Sorry, I couldn’t check your info right now. How can I assist you today?",
+                "response_type": "tool-response"
+            }))
+
+
+
     elif toolName == "verify":
         print(f'Verifying customer identity with parameters: {parameters}')
         # Extract verification parameters

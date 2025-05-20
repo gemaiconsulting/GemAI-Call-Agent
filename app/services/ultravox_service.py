@@ -2,6 +2,7 @@
 Services for interacting with Ultravox voice AI.
 """
 import json
+from app.core.prompts import get_personalized_system_message
 import requests
 from app.core.config import (
     ULTRAVOX_API_KEY,
@@ -21,68 +22,85 @@ async def create_ultravox_call(system_prompt: str, first_message: str, agent_id:
         "X-API-Key": ULTRAVOX_API_KEY,
         "Content-Type": "application/json"
     }
+    print("📞 check_returning_user number:", agent_id)
+
 
     payload = {
-        "systemPrompt": system_prompt,
+        "systemPrompt": get_personalized_system_message(first_message),
         "model": ULTRAVOX_MODEL,
-        "voice": "Tanya-English",
-        "temperature":0.1,
+        "voice": voice,
+        "temperature": 0.1,
         "initialMessages": [
             {
-                "role": "MESSAGE_ROLE_USER",  
+                "role": "MESSAGE_ROLE_USER",
                 "text": first_message
             }
         ],
         "medium": {
             "serverWebSocket": {
-                "inputSampleRate": ULTRAVOX_SAMPLE_RATE,   
-                "outputSampleRate": ULTRAVOX_SAMPLE_RATE,   
+                "inputSampleRate": ULTRAVOX_SAMPLE_RATE,
+                "outputSampleRate": ULTRAVOX_SAMPLE_RATE,
                 "clientBufferSizeMs": ULTRAVOX_BUFFER_SIZE
             }
         },
         "vadSettings": {
-            "turnEndpointDelay": "0.384s", # only multiples of 32ms are meaningful.
+            "turnEndpointDelay": "0.384s",
             "minimumTurnDuration": "0s",
             "minimumInterruptionDuration": "0.09s"
         },
-        "selectedTools": [  
-            {
-                "temporaryTool": {
-                    "modelToolName": "verify",
-                    "description": "Verify the customer's identity before proceeding with any sensitive information or actions",
-                    "dynamicParameters": [
+        "selectedTools": [
                         {
-                            "name": "full_name",
-                            "location": "PARAMETER_LOCATION_BODY",
-                            "schema": {
+                        "temporaryTool": {
+                            "modelToolName": "check_returning_user",
+                            "description": "Check if the caller has previously interacted and return a personalized greeting if found.",
+                            "dynamicParameters": [
+                            {
+                                "name": "caller_number",
+                                "location": "PARAMETER_LOCATION_STATIC",
+                                "schema": {
                                 "type": "string",
-                                "description": "Customer's full name for verification"
-                            },
-                            "required": True
-                        },
-                        {
-                            "name": "date_of_birth",
-                            "location": "PARAMETER_LOCATION_BODY",
-                            "schema": {
-                                "type": "string",
-                                "description": "Customer's date of birth (YYYY-MM-DD format)"
-                            },
-                            "required": True
-                        },
-                        {
-                            "name": "policy_number",
-                            "location": "PARAMETER_LOCATION_BODY",
-                            "schema": {
-                                "type": "string",
-                                "description": "Customer's insurance policy number"
-                            },
-                            "required": True
+                                "description": "Phone number of the caller"
+                                },
+                                "required": True
+                            }
+                            ],
+                            "staticParameters": [
+                            {"name": "caller_number",
+                            "value": agent_id # ✅ This now passes the number properly
+                            }],
+                            "timeout": "10s",
+                            "client": {}
                         }
-                    ],
-                    "timeout": "20s",
-                    "client": {},
-                },
-            },
+                        },
+    {
+      "temporaryTool": {
+        "modelToolName": "verify",
+        "description": "Verify the customer's identity before proceeding with any sensitive information or actions",
+        "dynamicParameters": [
+          {
+            "name": "full_name",
+            "location": "PARAMETER_LOCATION_BODY",
+            "schema": {"type": "string", "description": "Customer's full name"},
+            "required": True
+          },
+          {
+            "name": "date_of_birth",
+            "location": "PARAMETER_LOCATION_BODY",
+            "schema": {"type": "string", "description": "DOB (YYYY-MM-DD)"},
+            "required": True
+          },
+          {
+            "name": "policy_number",
+            "location": "PARAMETER_LOCATION_BODY",
+            "schema": {"type": "string", "description": "Insurance policy number"},
+            "required": True
+          }
+        ],
+        "timeout": "20s",
+        "client": {}
+      }
+    },
+
             {
                 "temporaryTool": {
                     "modelToolName": "move_to_claim_handling",
@@ -278,6 +296,7 @@ async def create_ultravox_call(system_prompt: str, first_message: str, agent_id:
             }
         ]
     }
+    print(f"📞 Using caller_number = {agent_id}")
     print("📤 Payload being sent to Ultravox:")
     print(json.dumps(payload, indent=2))
 
@@ -291,7 +310,7 @@ async def create_ultravox_call(system_prompt: str, first_message: str, agent_id:
 
         body = resp.json()
         join_url = body.get("joinUrl") or ""
-        print("Ultravox joinUrl received:", join_url)  # Enhanced logging
+        print("Ultravox joinUrl received:", join_url)
         return join_url
     except Exception as e:
         print("Ultravox create call request failed:", e)

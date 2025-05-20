@@ -1,7 +1,9 @@
+
 """
 WebSocket handlers for Twilio and Ultravox media streaming.
 """
 import json
+import uuid
 import asyncio
 import audioop
 import base64
@@ -16,7 +18,7 @@ from app.services.ultravox_service import create_ultravox_call
 from app.core.prompts import SYSTEM_MESSAGE
 from app.core.shared_state import sessions
 from fastapi import APIRouter
-from app.api.endpoints.calls import send_action_to_n8n
+from app.services.n8n_service import send_action_to_n8n
 
 router = APIRouter()
 
@@ -98,9 +100,6 @@ async def media_stream(websocket: WebSocket):
                             role_cap = role.capitalize()
                             session['transcript'] += f"{role_cap}: {text}\n"
 
-                        if role and text:
-                            role_cap = role.capitalize()
-                            session['transcript'] += f"{role_cap}: {text}\n"
 
                             # Dynamic entity capture from user input
                             if "@" in text and "." in text:
@@ -112,37 +111,42 @@ async def media_stream(websocket: WebSocket):
 
                             print("📩 Current session name:", session.get("callerName"))
                             print("📧 Current session email:", session.get("callerEmail"))
+                        
+                        # 🔁 Real-time N8N trigger on booking intent
+                            if "book" in lower_text and "appointment" in lower_text and not session.get("realtime_payload_sent"):
+                                caller_name = session.get("callerName", "Unknown")
+                                caller_email = session.get("callerEmail", "Unknown")
+                                calendar_id = session.get("calendar_id", "primary")
+                                appointment_time = session.get("appointmentTime")
 
-                        if final and "book" in lower_text and "appointment" in lower_text:
+                                await send_action_to_n8n(
+                                    action="book_call",
+                                    session_id=call_sid,
+                                    caller_number=session.get("callerNumber"),
+                                    extra_data={
+                                        "data": json.dumps({
+                                            "name": caller_name,
+                                            "email": caller_email,
+                                            "purpose": text,
+                                            "datetime": appointment_time,
+                                            "calendar_id": calendar_id
+                                        })
+                                    }
+                                )
+                                session["realtime_payload_sent"] = True
+                                print("📤 Real-time payload sent to N8N on detected intent.")
 
-                            # Fetch dynamic session values if present
+
+
+
+                            emoji = "🤖" if role_cap == "Agent" else "👤"
                             caller_name = session.get("callerName", "Unknown")
-                            calendar_id = session.get("calendar_id", "primary")  # fallback if not yet captured
-                            appointment_time = session.get("appointmentTime")  # expected to be set dynamically if available
+                            caller_email = session.get("callerEmail", "Unknown")
+                            print(f"📅 Booking request from {caller_name} ({caller_email}) with content: {text}")
+                            print(f"{emoji} {role_cap}: {text}")
 
-                            send_action_to_n8n(
-                                action="book_call",
-                                session_id=call_sid,
-                                caller_number=session.get("callerNumber"),
-                                extra_data={
-                                    "data": json.dumps({
-                                        "name": caller_name,
-                                        "email": caller_email,
-                                        "purpose": text,
-                                        "datetime": appointment_time,
-                                        "calendar_id": calendar_id
-                                    })
-                                }
-                            )
-
-                        emoji = "🤖" if role_cap == "Agent" else "👤"
-                        caller_name = session.get("callerName", "Unknown")
-                        caller_email = session.get("callerEmail", "Unknown")
-                        print(f"📅 Booking request from {caller_name} ({caller_email}) with content: {text}")
-                        print(f"{emoji} {role_cap}: {text}")
-
-                        if final:
-                            print(f"Transcript for {role_cap} finalized.")
+                            if final:
+                                print(f"Transcript for {role_cap} finalized.")
 
 
                     elif msg_type == "client_tool_invocation":
@@ -159,10 +163,23 @@ async def media_stream(websocket: WebSocket):
                     
 
                     elif msg_type == "state":
-                        # Handle state messages
                         state = msg_data.get("state")
                         if state:
                             print(f"Agent state: {state}")
+
+                            if state == "ready":
+                                print("✅ Agent is ready, sending check_returning_user tool...")
+
+                                invocation_id = str(uuid.uuid4())
+
+                                await uv_ws.send(json.dumps({
+                                    "type": "client_tool_invocation",
+                                    "toolName": "check_returning_user",
+                                    "invocationId": invocation_id,
+                                    "parameters": {
+                                        "caller_number": session.get("callerNumber", "Unknown")
+                                    }
+                                }))
 
                     elif msg_type == "debug":
                         # Handle debug messages
@@ -176,7 +193,8 @@ async def media_stream(websocket: WebSocket):
                             if nested_type == "toolResult":
                                 tool_name = nested_msg.get("toolName")
                                 output = nested_msg.get("output")
-                                print(f"Tool '{tool_name}' result: {output}")
+                                print(f"✅ Tool '{tool_name}' completed with output:\n{json.dumps(output, indent=2)}")
+
 
 
                             else:
@@ -236,13 +254,17 @@ async def media_stream(websocket: WebSocket):
                     # print("Custom Params:", custom_parameters)
 
                     # Extract first_message and caller_number
-                    first_message = custom_parameters.get('firstMessage', "Hello, how can I assist you?")
+                    raw_first_message = custom_parameters.get('firstMessage', "Hello, how can I assist you?")
+                    first_message = raw_first_message['message']['content'] if isinstance(raw_first_message, dict) and 'message' in raw_first_message else str(raw_first_message)
+
                     caller_number = custom_parameters.get('callerNumber', 'Unknown')
 
                     if call_sid and call_sid in sessions:
                         session = sessions[call_sid]
                         session['callerNumber'] = caller_number
                         session['streamSid'] = stream_sid
+                        session['transcript'] = ""
+
                     else:
                         print(f"Session not found for CallSid: {call_sid}")
                         await websocket.close()
@@ -250,15 +272,19 @@ async def media_stream(websocket: WebSocket):
 
                     print("Caller Number:", caller_number)
                     print("First Message:", first_message)
+                    # 🔁 TEMP: Send fake intent to n8n for test purposes
+
+
 
                     from app.core.prompts import SYSTEM_MESSAGE
 
                     uv_join_url = await create_ultravox_call(
                     system_prompt=SYSTEM_MESSAGE,
-                    first_message="Hello",
-                    agent_id=session.get("agentId", ""),
-                    voice="Tanya-English"  # ✅ Verified working female voice
+                    first_message=first_message,
+                    agent_id=caller_number,
+                    voice="Tanya-English"
                     )
+
 
                     if not uv_join_url:
                         print("Ultravox joinUrl is empty. Cannot establish WebSocket connection.")
@@ -275,6 +301,7 @@ async def media_stream(websocket: WebSocket):
                             close_timeout=5.0    # Wait 5 seconds for close handshake
                         )
                         print("Ultravox WebSocket connected.")
+
                         # Update state tracking
                         ultravox_ws_active = True
                         # Store the uv_ws and active states in the session for tool access
@@ -372,13 +399,13 @@ async def media_stream(websocket: WebSocket):
                 print(f"Unexpected error in WebSocket cleanup: {e}")
         
         # Ensure everything is cleaned up
-        if session and call_sid:
-            # Send any final transcript data to N8N if not already sent
-            if not session.get('transcript_sent', False):
-                try:
-                    await send_transcript_to_n8n(session)
+    if session and call_sid:
+        if not session.get('realtime_payload_sent', False) and not session.get('transcript_sent', False):
+            try:
+                await send_transcript_to_n8n(session)
+
                     # No need to set transcript_sent = True here as send_transcript_to_n8n does that
-                except Exception as e:
+            except Exception as e:
                     print(f"Error sending final transcript: {e}")
             
             print(f"Cleaning up session for CallSid={call_sid}")

@@ -359,3 +359,17 @@ def get_stage_voice(stage_type):
         str: The voice identifier for the specified stage
     """
     return STAGE_VOICES.get(stage_type.lower(), "Tanya-English")
+
+
+def get_personalized_system_message(_: str) -> str:
+    """
+    Return the static system prompt without injecting the first_message.
+    The greeting is now handled only in initialMessages.
+    """
+    return SYSTEM_MESSAGE
+
+
+
+
+
+

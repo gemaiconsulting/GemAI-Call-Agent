@@ -5,6 +5,7 @@ import json
 import requests
 from datetime import datetime
 from twilio.rest import Client
+import traceback
 from fastapi import APIRouter, Request, Response
 from xml.sax.saxutils import escape
 from app.core.shared_state import sessions
@@ -19,9 +20,11 @@ from app.core.config import (
 
 router = APIRouter()
 
+# 🔍 Fetch initial greeting message from N8N
 async def get_first_message_from_n8n(caller_number: str) -> str:
+    print("\n📨 get_first_message_from_n8n() called with:", caller_number)
     try:
-        print("🔁 Sending to n8n for personalization (route: 1)...")
+        print("🔁 Sending POST to n8n (route: 1)...")
         webhook_response = requests.post(
             N8N_WEBHOOK_URL,
             headers={"Content-Type": "application/json"},
@@ -31,15 +34,20 @@ async def get_first_message_from_n8n(caller_number: str) -> str:
                 "data": "empty"
             }
         )
+        print("🌐 N8N webhook response status:", webhook_response.status_code)
 
         if webhook_response.ok:
             response_text = webhook_response.text
+            print("📨 Raw response from N8N:", response_text)
+
             try:
                 response_data = json.loads(response_text)
+                print("✅ Parsed JSON from N8N:", response_data)
+
                 if response_data.get('firstMessage'):
                     fm = response_data['firstMessage']
+                    print("🔎 Detected firstMessage:", fm)
 
-            # Handle list format (most common from n8n)
                     if isinstance(fm, list) and len(fm) > 0 and isinstance(fm[0], dict):
                         msg = fm[0].get("message", {})
                         content = msg.get("content")
@@ -47,32 +55,31 @@ async def get_first_message_from_n8n(caller_number: str) -> str:
                             print("✅ Extracted content from n8n list format:", content)
                             return content
 
-            # Handle direct object format
                     elif isinstance(fm, dict) and 'message' in fm:
                         content = fm['message'].get('content')
                         if content:
                             print("✅ Extracted content from n8n object format:", content)
                             return content
 
-            # Fallback
-                    print("⚠️ Unexpected format. Returning raw:", fm)
+                    print("⚠️ Unexpected 'firstMessage' format. Fallback to raw:", fm)
                     return str(fm)
-            except json.JSONDecodeError:
-                print("⚠️ Could not parse n8n JSON. Using raw string.")
+
+            except json.JSONDecodeError as je:
+                print("❌ JSON decoding failed:", je)
                 return response_text.strip()
         else:
-            print("❌ N8N webhook failed:", webhook_response.status_code)
+            print("❌ N8N webhook failed:", webhook_response.status_code, webhook_response.text)
 
     except Exception as e:
-         print("❌ Error calling n8n webhook:", e)
+        print("❌ Exception while calling N8N webhook:", e)
 
+    print("🔁 Falling back to DEFAULT_FIRST_MESSAGE.")
     return DEFAULT_FIRST_MESSAGE
-
-
 
 
 @router.get("/")
 async def root():
+    print("📡 GET / called — health check OK")
     return {"message": "Twilio + Ultravox Media Stream Server is running!"}
 
 
@@ -87,18 +94,19 @@ async def incoming_call(request: Request):
             form_dict = dict(form_data)
             print("📞 Parsed form data:", form_dict)
         except Exception as fe:
-            print("⚠️ Could not parse form data:", str(fe))
+            print("❌ Failed to parse form data:", fe)
             form_dict = {}
-
-
 
         # Extract values
         caller_number = form_dict.get("From", "Unknown")
         call_sid = form_dict.get("CallSid", "Unknown")
+        print(f"📞 Caller Number: {caller_number}, CallSid: {call_sid}")
+
+        # Fetch first message
         first_message = await get_first_message_from_n8n(caller_number)
+        print("💬 First Message returned from N8N handler:", first_message)
 
-
-        # ✅ Pre-create session for media-stream to find
+        # Create session
         if call_sid and call_sid not in sessions:
             sessions[call_sid] = {
                 "callSid": call_sid,
@@ -109,16 +117,15 @@ async def incoming_call(request: Request):
                 "firstMessage": first_message,
                 "transcript_sent": False
             }
+            print(f"📦 Session created for CallSid: {call_sid}")
 
-        # Build WebSocket stream URL
         stream_url = f"{PUBLIC_URL.replace('https', 'wss')}/media-stream"
         print("🔗 WebSocket stream URL:", stream_url)
-        
-        # Escape special XML characters in the first_message
+
+        from xml.sax.saxutils import escape
         escaped_first_message = escape(str(first_message))
 
-
-        # Return TwiML
+        # Respond with TwiML
         twiml = f"""
         <?xml version="1.0" encoding="UTF-8"?>
         <Response>
@@ -131,10 +138,13 @@ async def incoming_call(request: Request):
             </Connect>
         </Response>
         """
+        print("✅ Returning TwiML response.")
         return Response(content=twiml.strip(), media_type="text/xml")
 
     except Exception as e:
-        print("❌ Error in incoming_call:", str(e))
+        print("❌ Fatal error in /incoming-call route:", e)
+        traceback.print_exc()
+
         error_twiml = f"""
         <?xml version="1.0" encoding="UTF-8"?>
         <Response>
@@ -144,19 +154,22 @@ async def incoming_call(request: Request):
         return Response(content=error_twiml.strip(), media_type="text/xml", status_code=500)
 
 
+
 @router.post("/call-status")
 async def call_status(request: Request):
+    print("\n📞 POST /call-status triggered")
+
     try:
         data = await request.form()
-        print('\n=== 📱 Twilio Status Update ===')
-        print('Status:', data.get('CallStatus'))
-        print('Duration:', data.get('CallDuration'))
-        print('Timestamp:', data.get('Timestamp'))
-        print('Call SID:', data.get('CallSid'))
+        print('=== 📱 Twilio Status Update ===')
+        print('📍 Call Status:', data.get('CallStatus'))
+        print('⏱️ Call Duration:', data.get('CallDuration'))
+        print('🕒 Timestamp:', data.get('Timestamp'))
+        print('📌 Call SID:', data.get('CallSid'))
         print('====== END ======\n')
 
     except Exception as e:
-        print(f"Error in call-status handler: {e}")
+        print(f"❌ Exception in /call-status handler: {e}")
         return {"error": str(e)}, 400
 
     return {"success": True}

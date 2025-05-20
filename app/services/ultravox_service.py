@@ -14,8 +14,6 @@ from app.core.config import (
 )
 
 
-
-
 async def create_ultravox_call(system_prompt: str, first_message: str, agent_id: str, voice: str) -> str:
     """
     Creates a new Ultravox call in serverWebSocket mode and returns the joinUrl.
@@ -24,11 +22,11 @@ async def create_ultravox_call(system_prompt: str, first_message: str, agent_id:
     headers = {
         "X-API-Key": ULTRAVOX_API_KEY,
         "Content-Type": "application/json"
-
-
     }
-    print("📞 check_returning_user number:", agent_id)
 
+    print("\n🎤 [create_ultravox_call] Starting Ultravox call creation")
+    print("🗣️ First Message:", first_message)
+    print("📞 Caller Number (agent_id):", agent_id)
 
     payload = {
         "systemPrompt": system_prompt,
@@ -54,120 +52,70 @@ async def create_ultravox_call(system_prompt: str, first_message: str, agent_id:
             "minimumInterruptionDuration": "0.09s"
         },
         "selectedTools": [
-        {
-           "temporaryTool": {
-               "modelToolName": "check_returning_user",
-               "description": "Check if the caller has previously interacted and return a personalized greeting if found.",
-               "dynamicParameters": [
-                   {
-                       "name": "caller_number",
-                       "location": 4,                
-                       "schema": { "type": "string", "description": "Phone number of the caller" },
-                       "required": True
-                   }
-               ],
-                
-               "timeout": "10s",
-              "http": {
-             "url": "https://harbormoor.app.n8n.cloud/webhook/route1",
-             "httpMethod": "POST"
-           }
-           }
-           
-       },         
-          
-             {
+            {
+                "temporaryTool": {
+                    "modelToolName": "check_returning_user",
+                    "description": "Check if the caller has previously interacted and return a personalized greeting if found.",
+                    "dynamicParameters": [
+                        {
+                            "name": "caller_number",
+                            "location": 4,
+                            "schema": {"type": "string", "description": "Phone number of the caller"},
+                            "required": True
+                        }
+                    ],
+                    "timeout": "10s",
+                    "http": {
+                        "baseUrlPattern": "https://harbormoor.app.n8n.cloud/webhook/route1",
+                        "httpMethod": "POST"
+                    }
+                }
+            },
+            {
                 "temporaryTool": {
                     "modelToolName": "schedule_meeting",
                     "description": "Schedule a meeting for a customer. Returns a message indicating whether the booking was successful or not.",
                     "dynamicParameters": [
-                        {
-                            "name": "name",
-                            "location": 4,
-                            "schema": {
-                                "type": "string",
-                                "description": "Customer's full name"
-                            },
-                            "required": True
-                        },
-                        {
-                            "name": "email",
-                            "location": 4,
-                            "schema": {
-                                "type": "string",
-                                "description": "Customer's email"
-                            },
-                            "required": True
-                        },
-                        {
-                            "name": "purpose",
-                            "location": 4,
-                            "schema": {
-                                "type": "string",
-                                "description": "Purpose of the Meeting"
-                            },
-                            "required": True
-                        },
-                        {
-                            "name": "datetime",
-                            "location": 4,
-                            "schema": {
-                                "type": "string",
-                                "description": "Meeting Datetime"
-                            },
-                            
-                            "required": True
-                        },
-                        {
-        "name": "calendar_id",
-        "location": 4,
-        "schema": {
-          "type": "string",
-          "description": "ID of the calendar to schedule the meeting in"
-        },
-         "required": True
-                        }
+                        {"name": "name", "location": 4, "schema": {"type": "string", "description": "Customer's full name"}, "required": True},
+                        {"name": "email", "location": 4, "schema": {"type": "string", "description": "Customer's email"}, "required": True},
+                        {"name": "purpose", "location": 4, "schema": {"type": "string", "description": "Purpose of the Meeting"}, "required": True},
+                        {"name": "datetime", "location": 4, "schema": {"type": "string", "description": "Meeting Datetime"}, "required": True},
+                        {"name": "calendar_id", "location": 4, "schema": {"type": "string", "description": "ID of the calendar to schedule the meeting in"}, "required": True}
                     ],
                     "timeout": "20s",
-           "http": {
-             "url": "https://harbormoor.app.n8n.cloud/webhook/route3",
-             "httpMethod": "POST",
-           }
+                    "http": {
+                        "baseUrlPattern": "https://harbormoor.app.n8n.cloud/webhook/route3",
+                        "httpMethod": "POST"
+                    }
                 }
             }
         ],
-        "tool_choice": "auto",
-       "metadata": {
-           "caller_number": agent_id
-       }
+        "metadata": {
+            "caller_number": agent_id
+        }
     }
 
-    print(f"📞 Using caller_number = {agent_id}")
     print("📤 Payload being sent to Ultravox:")
     print(json.dumps(payload, indent=2))
 
     try:
         async with httpx.AsyncClient() as client:
             resp = await client.post(url, headers=headers, json=payload)
-            resp.raise_for_status()  # ✅ <-- Add this line here
-
-                        # ── DEBUG ──
-            print("🧨 Ultravox Response Status:", resp.status_code)
+            print("📬 Ultravox API response status:", resp.status_code)
             try:
-                print("🧨 Ultravox Response Body:", resp.json())
+                print("📦 Ultravox API JSON response:", resp.json())
             except Exception:
-                print("🧨 Ultravox Response Text:", await resp.text())
-            # ───────────
+                print("📦 Ultravox API text response:", await resp.text())
 
-
-
-        
+            resp.raise_for_status()  # will raise if status code is not 2xx
 
         body = resp.json()
         join_url = body.get("joinUrl", "")
-        print("Ultravox joinUrl received:", join_url)
+        print("✅ Ultravox joinUrl received:", join_url)
         return join_url
+
     except Exception as e:
-        print("Ultravox create call request failed:", str(e))
-        print("Failed Payload:", json.dumps(payload, indent=2))
+        print("❌ Ultravox create call request failed:", str(e))
+        print("🚫 Failed Payload:")
+        print(json.dumps(payload, indent=2))
         return ""

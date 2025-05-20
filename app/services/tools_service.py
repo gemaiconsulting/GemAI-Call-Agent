@@ -164,43 +164,23 @@ async def handle_tool_invocation(uv_ws, toolName, invocationId, parameters):
     elif toolName == "schedule_meeting":
         print(f'Arguments passed to schedule_meeting tool: {parameters}')
         # Validate required parameters
-        required_params = ["name", "email", "purpose", "datetime", "calendar_id"]
+        required_params = ["name", "email", "purpose", "datetime", "location"]
         missing_params = [param for param in required_params if not parameters.get(param)]
 
         if missing_params:
             print(f"Missing parameters for schedule_meeting: {missing_params}")
-            prompt_message = (
-                f"Please provide the following information to schedule your meeting: "
-                f"{', '.join(missing_params)}."
-            )
-            await uv_ws.send(json.dumps({
+
+            # Inform the agent to prompt the user for missing parameters
+            prompt_message = f"Please provide the following information to schedule your meeting: {', '.join(missing_params)}."
+            tool_result = {
                 "type": "client_tool_result",
                 "invocationId": invocationId,
                 "result": prompt_message,
                 "response_type": "tool-response"
-            }))
-            return
-
-        # 🔍 1) Find the session tied to this WebSocket
-        session = None
-        for sid, sess in sessions.items():
-            if sess.get("uv_ws") == uv_ws:
-                session = sess
-                break
-
-        # 🛑 2) If no session, error out so we notice
-        if not session:
-            print("❌ schedule_meeting: no session found for this WebSocket")
-            await uv_ws.send(json.dumps({
-                "type": "client_tool_result",
-                "invocationId": invocationId,
-                "error_message": "Internal error: session not found"
-            }))
-            return
-
-        # ✅ 3) Now pass the real session into the helper
-        await handle_schedule_meeting(uv_ws, session, invocationId, parameters)
-
+            }
+            await uv_ws.send(json.dumps(tool_result))
+        else:
+            await handle_schedule_meeting(uv_ws, None, invocationId, parameters)
     
     elif toolName == "escalate_to_manager":
         print(f'Escalating to manager with parameters: {parameters}')
@@ -347,62 +327,61 @@ async def handle_schedule_meeting(uv_ws, session, invocationId: str, parameters)
     Uses N8N to finalize a meeting schedule.
     """
     try:
-        # ── 1) Extract parameters ──────────────────────────────────────────────
-        name         = parameters.get("name")
-        email        = parameters.get("email")
-        purpose      = parameters.get("purpose")
+        name = parameters.get("name")
+        email = parameters.get("email")
+        purpose = parameters.get("purpose")
         datetime_str = parameters.get("datetime")
-        calendar_id  = parameters.get("calendar_id")
+        location = parameters.get("location")
 
-        print(
-            f"Received schedule_meeting parameters: "
-            f"name={name}, email={email}, purpose={purpose}, "
-            f"datetime={datetime_str}, calendar_id={calendar_id}"
-        )
+        print(f"Received schedule_meeting parameters: name={name}, email={email}, purpose={purpose}, datetime={datetime_str}, location={location}")
 
-        # ── 2) Validate required parameters ────────────────────────────────────
-        if not all([name, email, purpose, datetime_str, calendar_id]):
+        # Validate parameters
+        if not all([name, email, purpose, datetime_str, location]):
             raise ValueError("One or more required parameters are missing.")
+        
+        calendars = CALENDARS_LIST
+        calendar_id = calendars.get(location, None)
+        if not calendar_id:
+            raise ValueError(f"Invalid location: {location}")
 
-        # ── 3) Build the data & payload ───────────────────────────────────────
         data = {
-            "name":        name,
-            "email":       email,
-            "purpose":     purpose,
-            "datetime":    datetime_str,
+            "name": name,
+            "email": email,
+            "purpose": purpose,
+            "datetime": datetime_str,
             "calendar_id": calendar_id
         }
 
+        # Fire off the scheduling request to N8N
         payload = {
-            "route":  "3",
+            "route": "3",
             "number": session.get("callerNumber", "Unknown"),
-            "data":   json.dumps(data)
+            "data": json.dumps(data)
         }
         print(f"Sending payload to N8N: {json.dumps(payload, indent=2)}")
-
-        # ── 4) Fire off the webhook ────────────────────────────────────────────
         webhook_response = await send_to_webhook(payload)
-        parsed_response  = json.loads(webhook_response)
-        booking_message  = parsed_response.get(
-            "message",
-            "I'm sorry, I couldn't schedule the meeting at this time."
-        )
+        parsed_response = json.loads(webhook_response)
+        booking_message = parsed_response.get('message', 
+            "I'm sorry, I couldn't schedule the meeting at this time.")
 
-        # ── 5) Send result back to Ultravox ───────────────────────────────────
-        await uv_ws.send(json.dumps({
-            "type":         "client_tool_result",
+        # Return the final outcome to Ultravox
+        tool_result = {
+            "type": "client_tool_result",
             "invocationId": invocationId,
-            "result":       booking_message,
-            "response_type":"tool-response"
-        }))
+            "result": booking_message,
+            "response_type": "tool-response"
+        }
+        await uv_ws.send(json.dumps(tool_result))
         print(f"Sent schedule_meeting result to Ultravox: {booking_message}")
 
     except Exception as e:
         print(f"Error scheduling meeting: {e}")
-        await uv_ws.send(json.dumps({
-            "type":          "client_tool_result",
-            "invocationId":  invocationId,
-            "error_type":    "implementation-error",
+        # Send error result back to Ultravox
+        error_result = {
+            "type": "client_tool_result",
+            "invocationId": invocationId,
+            "error_type": "implementation-error",
             "error_message": "An error occurred while scheduling your meeting."
-        }))
+        }
+        await uv_ws.send(json.dumps(error_result))
         print("Sent error message for schedule_meeting to Ultravox.")

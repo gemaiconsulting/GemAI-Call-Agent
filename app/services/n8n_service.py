@@ -1,5 +1,5 @@
 """
-Services for handling webhook communications.
+Services for handling webhook communications with detailed logging.
 """
 import json
 import httpx
@@ -11,16 +11,24 @@ RETRY_DELAY = 1.5  # seconds
 
 
 async def send_transcript_to_n8n(session):
-    print("📝 Full Transcript:\n", session['transcript'])
+    print("\n📝 send_transcript_to_n8n() called")
+    print("📞 Caller Number:", session.get("callerNumber", "Unknown"))
+    print("📄 Full Transcript:\n", session['transcript'])
+
     await send_to_webhook({
         "route": "2",
         "number": session.get("callerNumber", "Unknown"),
         "data": session["transcript"]
     })
+
     session['transcript_sent'] = True
+    print("✅ Transcript sent flag updated in session")
 
 
 async def send_to_webhook(payload: dict) -> str:
+    print("\n📨 send_to_webhook() called with payload:")
+    print(json.dumps(payload, indent=2))
+
     if not N8N_WEBHOOK_URL:
         error_msg = "❌ N8N_WEBHOOK_URL not set in environment"
         print(error_msg)
@@ -28,6 +36,7 @@ async def send_to_webhook(payload: dict) -> str:
 
     attempt = 0
     while attempt < MAX_RETRIES:
+        print(f"🌐 Attempting to call webhook (Attempt {attempt + 1}/{MAX_RETRIES})")
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 response = await client.post(
@@ -35,25 +44,39 @@ async def send_to_webhook(payload: dict) -> str:
                     json=payload,
                     headers={"Content-Type": "application/json"}
                 )
+
+                print(f"🔄 Webhook Response Code: {response.status_code}")
                 if response.status_code == 200:
-                    print(f"✅ N8N webhook call success (attempt {attempt + 1})")
+                    print("✅ N8N webhook call successful")
+                    print("📥 Response Text:", response.text)
                     return response.text
                 else:
-                    print(f"⚠️ N8N webhook returned {response.status_code}: {response.text}")
+                    print(f"⚠️ Non-200 response: {response.status_code}")
+                    print("📥 Response Body:", response.text)
+
         except httpx.RequestError as e:
-            print(f"❌ Request error on attempt {attempt + 1}: {e}")
+            print(f"❌ RequestError on attempt {attempt + 1}: {e}")
         except Exception as e:
             print(f"❌ Unexpected error on attempt {attempt + 1}: {e}")
 
         attempt += 1
-        print(f"⏳ Retrying in {RETRY_DELAY} seconds... (attempt {attempt + 1}/{MAX_RETRIES})")
-        await asyncio.sleep(RETRY_DELAY)
+        if attempt < MAX_RETRIES:
+            print(f"⏳ Retrying in {RETRY_DELAY} seconds... (Next Attempt: {attempt + 1})")
+            await asyncio.sleep(RETRY_DELAY)
 
-    return json.dumps({"error": f"Failed to reach N8N webhook after {MAX_RETRIES} attempts"})
-
+    error_summary = f"❌ Failed to reach N8N webhook after {MAX_RETRIES} attempts"
+    print(error_summary)
+    return json.dumps({"error": error_summary})
 
 
 async def send_action_to_n8n(action: str, session_id: str, caller_number: str, extra_data: dict = None):
+    print(f"\n🚀 send_action_to_n8n() triggered")
+    print(f"🔧 Action: {action}")
+    print(f"🧾 Session ID: {session_id}")
+    print(f"📞 Caller Number: {caller_number}")
+    if extra_data:
+        print("📦 Extra Data:", json.dumps(extra_data, indent=2))
+
     payload = {
         "route": "3",
         "action": action,
@@ -64,6 +87,7 @@ async def send_action_to_n8n(action: str, session_id: str, caller_number: str, e
     if extra_data:
         payload.update(extra_data)
 
+    print("📨 Final Payload to N8N:", json.dumps(payload, indent=2))
     response = await send_to_webhook(payload)
-    print(f"📡 Action sent to N8N: {action}, response: {response}")
+    print(f"📡 N8N responded to action '{action}': {response}")
     return response

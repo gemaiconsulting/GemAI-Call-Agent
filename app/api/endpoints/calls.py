@@ -88,19 +88,22 @@ async def incoming_call(request: Request):
     try:
         print("🟡 [Webhook Hit] POST /incoming-call")
 
-        # Parse form data
         try:
-            form_data = await request.form()
-            form_dict = dict(form_data)
-            print("📞 Parsed form data:", form_dict)
-        except Exception as fe:
-            print("❌ Failed to parse form data:", fe)
-            form_dict = {}
+            content_type = request.headers.get("content-type", "")
+            if "application/json" in content_type:
+                data = await request.json()
+                print("📦 Parsed JSON data:", data)
+            else:
+                form_data = await request.form()
+                data = dict(form_data)
+                print("📞 Parsed form data:", data)
+        except Exception as e:
+            print("❌ Failed to parse request:", e)
+            data = {}
 
-        # Extract values
-        caller_number = form_dict.get("From", "Unknown")
-        call_sid = form_dict.get("CallSid", "Unknown")
-        print(f"📞 Caller Number: {caller_number}, CallSid: {call_sid}")
+        # Use `data` instead of `form_dict`
+        caller_number = data.get("From", "Unknown")
+        call_sid = data.get("CallSid", "Unknown")
 
         # Fetch first message
         first_message = await get_first_message_from_n8n(caller_number)

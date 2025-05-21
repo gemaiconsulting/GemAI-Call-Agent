@@ -16,7 +16,7 @@ async def send_transcript_to_n8n(session):
     print("📄 Transcript skipped for log clarity")
 
     await send_to_webhook({
-        "route": "2",
+        "route": 2,
         "number": session.get("callerNumber", "Unknown"),
         # "data": session["transcript"]  ❌ Remove for now
         "data": "[Transcript removed for debugging]"  # ✅ Temporary placeholder

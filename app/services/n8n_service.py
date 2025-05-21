@@ -82,7 +82,7 @@ async def send_action_to_n8n(action: str, session_id: str, caller_number: str, e
         print("📦 Extra Data:", json.dumps(extra_data, indent=2))
 
     payload = {
-        "route": "3",
+        "route": 3,
         "action": action,
         "session_id": session_id,
         "caller_number": caller_number,

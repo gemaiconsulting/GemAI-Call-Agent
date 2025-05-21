@@ -29,7 +29,7 @@ async def get_first_message_from_n8n(caller_number: str) -> str:
             N8N_WEBHOOK_URL,
             headers={"Content-Type": "application/json"},
             json={
-                "route": "1",
+                "route": 1,
                 "number": caller_number,
                 "data": "empty"
             }

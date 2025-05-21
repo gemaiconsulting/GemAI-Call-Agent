@@ -37,6 +37,7 @@ async def send_to_webhook(payload: dict) -> str:
     attempt = 0
     while attempt < MAX_RETRIES:
         print(f"🌐 Attempting to call webhook (Attempt {attempt + 1}/{MAX_RETRIES})")
+        print(f"🔗 URL: {N8N_WEBHOOK_URL}")
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 response = await client.post(
@@ -46,18 +47,18 @@ async def send_to_webhook(payload: dict) -> str:
                 )
 
                 print(f"🔄 Webhook Response Code: {response.status_code}")
+                print("📥 Response Body:", response.text)
+
                 if response.status_code == 200:
                     print("✅ N8N webhook call successful")
-                    print("📥 Response Text:", response.text)
                     return response.text
                 else:
                     print(f"⚠️ Non-200 response: {response.status_code}")
-                    print("📥 Response Body:", response.text)
 
         except httpx.RequestError as e:
-            print(f"❌ RequestError on attempt {attempt + 1}: {e}")
+            print(f"❌ RequestError on attempt {attempt + 1}: {str(e)}")
         except Exception as e:
-            print(f"❌ Unexpected error on attempt {attempt + 1}: {e}")
+            print(f"❌ Unexpected error on attempt {attempt + 1}: {str(e)}")
 
         attempt += 1
         if attempt < MAX_RETRIES:
@@ -67,6 +68,7 @@ async def send_to_webhook(payload: dict) -> str:
     error_summary = f"❌ Failed to reach N8N webhook after {MAX_RETRIES} attempts"
     print(error_summary)
     return json.dumps({"error": error_summary})
+
 
 
 async def send_action_to_n8n(action: str, session_id: str, caller_number: str, extra_data: dict = None):

@@ -142,7 +142,7 @@ async def incoming_call(request: Request):
         </Response>
         """
         print("✅ Returning TwiML response.")
-        return Response(content=twiml.strip(), media_type="text/xml")
+        return Response(content=twiml.strip(), media_type="application/xml")
 
     except Exception as e:
         print("❌ Fatal error in /incoming-call route:", e)

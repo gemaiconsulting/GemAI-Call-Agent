@@ -13,16 +13,18 @@ RETRY_DELAY = 1.5  # seconds
 async def send_transcript_to_n8n(session):
     print("\n📝 send_transcript_to_n8n() called")
     print("📞 Caller Number:", session.get("callerNumber", "Unknown"))
-    print("📄 Full Transcript:\n", session['transcript'])
+    print("📄 Transcript skipped for log clarity")
 
     await send_to_webhook({
         "route": "2",
         "number": session.get("callerNumber", "Unknown"),
-        "data": session["transcript"]
+        # "data": session["transcript"]  ❌ Remove for now
+        "data": "[Transcript removed for debugging]"  # ✅ Temporary placeholder
     })
 
     session['transcript_sent'] = True
     print("✅ Transcript sent flag updated in session")
+
 
 
 async def send_to_webhook(payload: dict) -> str:

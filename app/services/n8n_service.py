@@ -10,20 +10,36 @@ MAX_RETRIES = 3
 RETRY_DELAY = 1.5  # seconds
 
 
+def detect_route(session: dict) -> int:
+    """
+    Detects the correct route to use in the webhook payload.
+    Priority:
+    1. Use session["route"] if explicitly set
+    2. Default to 2 if nothing is defined
+    """
+    if "route" in session and isinstance(session["route"], int):
+        return session["route"]
+    return 2  # Default fallback route
+
+
 async def send_transcript_to_n8n(session):
     print("\n📝 send_transcript_to_n8n() called")
-    print("📞 Caller Number:", session.get("callerNumber", "Unknown"))
-    print("📄 Transcript skipped for log clarity")
+    caller_number = session.get("callerNumber", "Unknown")
+    transcript = session.get("transcript", "")
+    route = detect_route(session)
 
-    await send_to_webhook({
-        "route": 2,
-        "number": session.get("callerNumber", "Unknown"),
-        "data": session["transcript"]
-    })
+    print(f"📞 Caller Number: {caller_number}")
+    print(f"🧭 Selected Route: {route}")
 
+    payload = {
+        "route": route,
+        "number": caller_number,
+        "data": transcript
+    }
+
+    await send_to_webhook(payload)
     session['transcript_sent'] = True
     print("✅ Transcript sent flag updated in session")
-
 
 
 async def send_to_webhook(payload: dict) -> str:
@@ -69,7 +85,6 @@ async def send_to_webhook(payload: dict) -> str:
     error_summary = f"❌ Failed to reach N8N webhook after {MAX_RETRIES} attempts"
     print(error_summary)
     return json.dumps({"error": error_summary})
-
 
 
 async def send_action_to_n8n(action: str, session_id: str, caller_number: str, extra_data: dict = None):

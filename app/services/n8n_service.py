@@ -18,8 +18,7 @@ async def send_transcript_to_n8n(session):
     await send_to_webhook({
         "route": 2,
         "number": session.get("callerNumber", "Unknown"),
-        # "data": session["transcript"]  ❌ Remove for now
-        "data": "[Transcript removed for debugging]"  # ✅ Temporary placeholder
+        "data": session["transcript"]
     })
 
     session['transcript_sent'] = True

@@ -22,8 +22,9 @@ async def startup_event():
     validate_config()
     print("✅ Config validated. Server ready.")
 
+# Only used for local development
 if __name__ == "__main__":
     import os
     port = int(os.getenv("PORT", "8000"))
-    print(f"Starting server on port {port}...")
-    uvicorn.run("app.main:app", host="0.0.0.0", port=port, reload=True)
+    print(f"🚀 Starting local server on http://localhost:{port}")
+    uvicorn.run("app.main:app", host="0.0.0.0", port=port)

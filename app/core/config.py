@@ -32,10 +32,6 @@ print("  - ULTRAVOX_VOICE:", ULTRAVOX_VOICE)
 print("  - ULTRAVOX_SAMPLE_RATE:", ULTRAVOX_SAMPLE_RATE)
 print("  - ULTRAVOX_BUFFER_SIZE:", ULTRAVOX_BUFFER_SIZE)
 
-# Pinecone
-PINECONE_API_KEY = os.environ.get('PINECONE_API_KEY')
-print("\n🌲 Pinecone API Key:", "✅ Loaded" if PINECONE_API_KEY else "❌ MISSING")
-
 # Webhooks
 N8N_WEBHOOK_URL = os.environ.get('N8N_WEBHOOK_URL')
 PUBLIC_URL = os.environ.get('PUBLIC_URL')

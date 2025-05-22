@@ -39,6 +39,8 @@ async def media_stream(websocket: WebSocket):
     ultravox_ws_active = False
 
     async def handle_ultravox():
+        printed_name = None
+        printed_email = None
         nonlocal uv_ws, session, stream_sid, call_sid, twilio_task, twilio_ws_active, ultravox_ws_active
         try:
             uv_ws.ping_timeout = 10.0
@@ -46,149 +48,136 @@ async def media_stream(websocket: WebSocket):
 
             async for raw_message in uv_ws:
                 if session and session.get('hanging_up', False):
-                    print("🔴 Ultravox session marked for hangup, exiting loop")
+                    print("🔴 Ultravox session marked for hangup. Exiting...")
                     break
 
                 if isinstance(raw_message, bytes):
                     try:
                         mu_law_bytes = audioop.lin2ulaw(raw_message, 2)
                         payload_base64 = base64.b64encode(mu_law_bytes).decode('ascii')
-                    except Exception as e:
-                        print(f"❌ Error transcoding PCM to µ-law: {e}")
-                        continue
-
-                    if twilio_ws_active:
-                        try:
+                        if twilio_ws_active:
                             await websocket.send_text(json.dumps({
                                 "event": "media",
                                 "streamSid": stream_sid,
-                                "media": {
-                                    "payload": payload_base64
-                                }
+                                "media": { "payload": payload_base64 }
                             }))
-                        except Exception as e:
-                            print(f"❌ Error sending media to Twilio: {e}")
-                            twilio_ws_active = False
-
-                else:
-                    try:
-                        msg_data = json.loads(raw_message)
                     except Exception as e:
-                        print(f"❌ Non-JSON message from Ultravox: {raw_message}")
+                        print(f"❌ Audio transcoding/sending error: {e}")
+                        twilio_ws_active = False
+                    continue
+
+                try:
+                    msg_data = json.loads(raw_message)
+                except Exception:
+                    print(f"❌ Invalid JSON from Ultravox: {raw_message}")
+                    continue
+
+                msg_type = msg_data.get("type") or msg_data.get("eventType")
+
+                if msg_type == "transcript":
+                    role = msg_data.get("role")
+                    text = msg_data.get("text") or msg_data.get("delta")
+                    final = msg_data.get("final", False)
+
+                    if not role or not text:
                         continue
 
-                    msg_type = msg_data.get("type") or msg_data.get("eventType")
+                    role_cap = role.capitalize()
+                    session['transcript'] += f"{role_cap}: {text}\n"
+                    lower_text = text.lower().strip()
 
-                    if msg_type == "transcript":
-                        role = msg_data.get("role")
-                        text = msg_data.get("text") or msg_data.get("delta")
-                        final = msg_data.get("final", False)
+                    # Print name once
+                    if any(p in lower_text for p in ["my name is", "this is", "i'm", "i am"]):
+                        name = text.strip()
+                        if name != printed_name:
+                            session["callerName"] = name
+                            printed_name = name
+                            print("📩 Name:", name)
 
-                        if role and text:
-                            role_cap = role.capitalize()
-                            session['transcript'] += f"{role_cap}: {text}\n"
+                    # Print email once
+                    if "@" in text and "." in text:
+                        email = text.strip()
+                        if email != printed_email:
+                            session["callerEmail"] = email
+                            printed_email = email
+                            print("📧 Email:", email)
 
-                            if "@" in text and "." in text:
-                                session["callerEmail"] = text.strip()
+                    # Trigger booking
+                    if "book" in lower_text and "appointment" in lower_text and not session.get("realtime_payload_sent"):
+                        print("📤 Booking intent detected. Sending to N8N...")
+                        await send_action_to_n8n(
+                            action="book_call",
+                            session_id=call_sid,
+                            caller_number=session.get("callerNumber"),
+                            extra_data={
+                                "data": json.dumps({
+                                    "name": session.get("callerName", "Unknown"),
+                                    "email": session.get("callerEmail", "Unknown"),
+                                    "purpose": text,
+                                    "datetime": session.get("appointmentTime"),
+                                    "calendar_id": session.get("calendar_id", "primary")
+                                })
+                            }
+                        )
+                        session["realtime_payload_sent"] = True
+                        print("✅ Realtime booking data sent.")
 
-                            lower_text = text.lower()
-                            if any(x in lower_text for x in ["my name is", "this is", "i'm", "i am"]):
-                                session["callerName"] = text.strip()
+                    if final:
+                        emoji = "🤖" if role_cap == "Agent" else "👤"
+                        print(f"{emoji} {role_cap}: {text.strip()}")
 
-                            print("📩 Name:", session.get("callerName"))
-                            print("📧 Email:", session.get("callerEmail"))
+                elif msg_type == "client_tool_invocation":
+                    print(f"🛠️ Tool invoked: {msg_data.get('toolName')} ({msg_data.get('invocationId')})")
+                    from app.services.tools_service import handle_tool_invocation
+                    await handle_tool_invocation(
+                        uv_ws,
+                        msg_data.get("toolName", ""),
+                        msg_data.get("invocationId"),
+                        msg_data.get("parameters", {})
+                    )
 
-                            if "book" in lower_text and "appointment" in lower_text and not session.get("realtime_payload_sent"):
-                                print("📤 Booking intent detected, sending to N8N...")
-                                await send_action_to_n8n(
-                                    action="book_call",
-                                    session_id=call_sid,
-                                    caller_number=session.get("callerNumber"),
-                                    extra_data={
-                                        "data": json.dumps({
-                                            "name": session.get("callerName", "Unknown"),
-                                            "email": session.get("callerEmail", "Unknown"),
-                                            "purpose": text,
-                                            "datetime": session.get("appointmentTime"),
-                                            "calendar_id": session.get("calendar_id", "primary")
-                                        })
-                                    }
-                                )
-                                session["realtime_payload_sent"] = True
-                                print("✅ Realtime booking data sent to N8N")
+                elif msg_type == "state":
+                    state = msg_data.get("state")
+                    print(f"🔄 Agent state: {state}")
+                    if state == "ready":
+                        invocation_id = str(uuid.uuid4())
+                        print("🚀 Agent ready. Checking returning user...")
+                        await uv_ws.send(json.dumps({
+                            "type": "client_tool_invocation",
+                            "toolName": "check_returning_user",
+                            "invocationId": invocation_id,
+                            "parameters": {
+                                "caller_number": session.get("callerNumber", "Unknown")
+                            }
+                        }))
 
-                            emoji = "🤖" if role_cap == "Agent" else "👤"
-                            print(f"{emoji} {role_cap}: {text}")
-                            if final:
-                                print(f"📌 Final transcript from {role_cap} received")
+                elif msg_type == "debug":
+                    debug_message = msg_data.get("message")
+                    print(f"🐛 Debug: {debug_message}")
+                    try:
+                        nested = json.loads(debug_message)
+                        if nested.get("type") == "toolResult":
+                            print(f"✅ Tool '{nested.get('toolName')}' result:", json.dumps(nested.get("output"), indent=2))
+                    except json.JSONDecodeError:
+                        print(f"⚠️ Couldn't parse debug: {debug_message}")
 
-                    elif msg_type == "client_tool_invocation":
-                        toolName = msg_data.get("toolName", "")
-                        invocationId = msg_data.get("invocationId")
-                        parameters = msg_data.get("parameters", {})
-                        print(f"🛠️ Tool invoked: {toolName}, ID: {invocationId}")
-                        from app.services.tools_service import handle_tool_invocation
-                        await handle_tool_invocation(uv_ws, toolName, invocationId, parameters)
+                elif msg_type in LOG_EVENT_TYPES:
+                    print(f"📣 Ultravox event: {msg_type} - {msg_data}")
 
-                    elif msg_type == "state":
-                        state = msg_data.get("state")
-                        print(f"🔄 Agent state: {state}")
-                        if state == "ready":
-                            print("🚀 Agent ready. Invoking check_returning_user...")
-                            invocation_id = str(uuid.uuid4())
-                            await uv_ws.send(json.dumps({
-                                "type": "client_tool_invocation",
-                                "toolName": "check_returning_user",
-                                "invocationId": invocation_id,
-                                "parameters": {
-                                    "caller_number": session.get("callerNumber", "Unknown")
-                                }
-                            }))
-
-                    elif msg_type == "debug":
-                        debug_message = msg_data.get("message")
-                        print(f"🐛 Ultravox debug: {debug_message}")
-                        try:
-                            nested_msg = json.loads(debug_message)
-                            if nested_msg.get("type") == "toolResult":
-                                print(f"✅ Tool '{nested_msg.get('toolName')}' result:", json.dumps(nested_msg.get("output"), indent=2))
-                        except json.JSONDecodeError:
-                            print(f"⚠️ Couldn't parse nested debug message: {debug_message}")
-
-                    elif msg_type == "playback_clear_buffer":
-                        pass
-                    elif msg_type in LOG_EVENT_TYPES:
-                        print(f"📣 Ultravox log event: {msg_type} - {msg_data}")
-                    else:
-                        print(f"❓ Unhandled Ultravox message type: {msg_type} - {msg_data}")
+                elif msg_type != "playback_clear_buffer":
+                    print(f"❓ Unknown message type: {msg_type} - {msg_data}")
 
         except websockets.exceptions.ConnectionClosedError as e:
-            print(f"🔌 Ultravox WebSocket closed with error: {e}")
-            ultravox_ws_active = False
-            if session:
-                session['ultravox_ws_active'] = False
-
+            print(f"🔌 Ultravox WebSocket closed unexpectedly: {e}")
         except websockets.exceptions.ConnectionClosedOK as e:
             print(f"🔚 Ultravox WebSocket closed normally: {e}")
-            ultravox_ws_active = False
-            if session:
-                session['ultravox_ws_active'] = False
-
         except Exception as e:
-            print(f"❌ Error in handle_ultravox: {e}")
+            print(f"❌ Unhandled error in handle_ultravox: {e}")
             traceback.print_exc()
         finally:
             ultravox_ws_active = False
             if session:
                 session['ultravox_ws_active'] = False
-
-
-
-
-
-
-
-
 
 
     # Define handler for Twilio messages

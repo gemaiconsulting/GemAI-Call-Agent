@@ -293,6 +293,10 @@ async def media_stream(websocket: WebSocket):
                 await safe_close_websocket(uv_ws, name="Ultravox WebSocket (Twilio disconnect)")
 
             if session and not session.get('transcript_sent', False):
+                transcript_text = session.get("transcript", "").lower()
+                if "dock tour" in transcript_text and "confirmation email" in transcript_text:
+                    session["route"] = 3
+                    print("🧭 Route set to 3 based on transcript content")
                 await send_transcript_to_n8n(session)
 
         except Exception as e:
@@ -321,6 +325,10 @@ async def media_stream(websocket: WebSocket):
     if session and call_sid:
         if not session.get('realtime_payload_sent', False) and not session.get('transcript_sent', False):
             try:
+                transcript_text = session.get("transcript", "").lower()
+                if "dock tour" in transcript_text and "confirmation email" in transcript_text:
+                    session["route"] = 3
+                    print("🧭 Route set to 3 based on transcript content")
                 await send_transcript_to_n8n(session)
             except Exception as e:
                 print(f"❌ Final transcript send error: {e}")

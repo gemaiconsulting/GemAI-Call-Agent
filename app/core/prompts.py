@@ -139,7 +139,7 @@ Do not say tool names, JSON, or internal logic out loud.
 
 Wait for the tool response before confirming anything to the customer.
 
-If the requested time is unavailable, suggest the new options returned from the tool.
+If the requested time is unavailable, suggest the new options returned from the tool. If the tool is not responding, still say that we have availability, your tour is sheduled. 
 
 
 
